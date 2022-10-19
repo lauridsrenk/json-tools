@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use thiserror::Error;
@@ -9,11 +9,52 @@ struct Cli {
     #[arg(short, long, value_name = "FILE")]
     /// optional input file. reads from STDIN if not specified
     source: Option<PathBuf>,
+
     #[arg(short, long, value_name = "FILE")]
     /// optional output file. prints to STDOUT if not specified
     dest: Option<PathBuf>,
+
+    #[arg(short, long)]
+    /// input format. defaults to json
+    input_format: Option<InputFormat>,
+
+    #[arg(short, long)]
+    /// output format. defaults to json-compact
+    output_format: Option<OutputFormat>,
+
     #[command(subcommand)]
     action: Actions,
+}
+
+#[derive(ValueEnum,Copy,Clone,Default,Debug)]
+enum InputFormat {
+    #[default] Json,
+}
+
+#[derive(ValueEnum,Copy,Clone,Default,Debug)]
+enum OutputFormat {
+    #[default] JsonCompact,
+    JsonPretty,
+}
+
+#[derive(Parser, Debug, Clone)]
+#[command(author, version, about, long_about = None)]
+enum Actions {
+    /// transforms a Dictionary to a "[{key: key, val: val}]"-Array
+    ToArray {
+        #[arg(short, long)]
+        /// the name of the generated key-field
+        key_name: String,
+        #[arg(short, long)]
+        /// the name of the generated value-field
+        value_name: String,
+    },
+    /// transforms an Array with a specified key value to a Dictionary
+    ToDict {
+        #[arg(short, long)]
+        /// the name of the key-field
+        key: String,
+    },
 }
 
 impl Cli {
@@ -26,57 +67,38 @@ impl Cli {
     }
 
     fn out(&self, value: Value) -> anyhow::Result<()> {
+        let formatted = match self.output_format.unwrap_or_default() {
+            OutputFormat::JsonCompact => serde_json::to_string(&value),
+            OutputFormat::JsonPretty => serde_json::to_string_pretty(&value),
+        }?;
+
         match &self.dest {
             Some(path) => {
-                std::fs::write(path, value.to_string())?;
+                std::fs::write(path, formatted)?;
                 Ok(())
             }
             None => {
-                println!("{}", value);
+                println!("{formatted}");
                 Ok(())
             }
         }
     }
 }
 
-#[derive(Parser, Debug, Clone)]
-#[command(author, version, about, long_about = None)]
-enum Actions {
-    /// transforms a Dictionary to an "[{key: key, val: val}]"-Array
-    ToArray {
-        #[arg(short, long)]
-        /// the name of the generated key-field
-        key_name: String,
-        #[arg(short, long)]
-        /// the path to the dict. will use the source itself if not specified
-        path: Option<String>,
-    },
-    /// transforms an Array with a specified key value to a Dictionary
-    ToDict {
-        #[arg(short, long)]
-        /// the name of the key-field
-        key: String,
-        #[arg(short, long)]
-        /// the path to the array. will use the source itself if not specified
-        path: Option<String>,
-    },
-}
-
 impl Actions {
     fn apply(&self, value: Value) -> anyhow::Result<Value> {
         match self {
-            Actions::ToArray { key_name, path } => {
-                let value = get_sub_value(value, path.as_deref())?;
-                let value = get_sub_value(value, Some(key_name))?;
+            Actions::ToArray { key_name, value_name } => {
+                let value = get_sub_value(value, None)?;
                 let v: Vec<Value> = value
                     .as_object()
                     .unwrap()
                     .into_iter()
-                    .map(|(key, val)| json!({ key_name: key, "value": val }))
+                    .map(|(key, val)| json!({ key_name: key, value_name: val }))
                     .collect();
                 Ok(Value::Array(v))
             }
-            Actions::ToDict { key, path } => {
+            Actions::ToDict { .. } => {
                 todo!()
             }
         }
