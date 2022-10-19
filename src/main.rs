@@ -1,7 +1,10 @@
+mod error;
+
 use clap::{Parser, ValueEnum};
 use serde_json::{json, Value};
 use std::path::PathBuf;
-use thiserror::Error;
+
+use error::{PathNotFound, WrongValueAtPath};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -120,17 +123,6 @@ fn get_sub_value(value: Value, path: Option<&str>) -> anyhow::Result<Value> {
     }
 }
 
-#[derive(Debug, Error)]
-#[error("could not find {at_path}")]
-struct PathNotFound {
-    at_path: String,
-}
-
-#[derive(Debug, Error)]
-#[error("value at path {at_path} is not a Dict")]
-struct WrongValueAtPath {
-    at_path: String,
-}
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
