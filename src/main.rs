@@ -29,22 +29,40 @@ struct Cli {
     action: Actions,
 }
 
-#[derive(ValueEnum,Copy,Clone,Default,Debug)]
+#[derive(ValueEnum, Copy, Clone, Default, Debug)]
 enum InputFormat {
-    #[default] Json,
+    #[default]
+    Json,
 }
 
-#[derive(ValueEnum,Copy,Clone,Default,Debug)]
+#[derive(ValueEnum, Copy, Clone, Default, Debug)]
 enum OutputFormat {
-    #[default] JsonCompact,
+    #[default]
+    JsonCompact,
     JsonPretty,
 }
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
 enum Actions {
-    /// transforms a Dictionary to a "[{key: key, val: val}]"-Array
+    /// transforms a Dictionary to an Array
     ToArray {
+        #[command(subcommand)]
+        method: ToArray,
+    },
+    /// transforms an Array with a specified key value to a Dictionary
+    ToDict {
+        #[arg(short, long)]
+        /// the name of the key-field
+        key: String,
+    },
+}
+
+#[derive(Parser, Debug, Clone)]
+#[command(author, version, about, long_about = None)]
+enum ToArray {
+    /// reshapes key and value into a "{key: key, value: value}"-like object
+    Box {
         #[arg(short, long)]
         /// the name of the generated key-field
         key_name: String,
@@ -52,11 +70,11 @@ enum Actions {
         /// the name of the generated value-field
         value_name: String,
     },
-    /// transforms an Array with a specified key value to a Dictionary
-    ToDict {
+    /// Integrates the key into the value-object
+    Integrate {
         #[arg(short, long)]
-        /// the name of the key-field
-        key: String,
+        /// the name of the generated key-field
+        key_name: String,
     },
 }
 
@@ -91,20 +109,36 @@ impl Cli {
 impl Actions {
     fn apply(&self, value: Value) -> anyhow::Result<Value> {
         match self {
-            Actions::ToArray { key_name, value_name } => {
-                let value = get_sub_value(value, None)?;
-                let v: Vec<Value> = value
-                    .as_object()
-                    .unwrap()
-                    .into_iter()
-                    .map(|(key, val)| json!({ key_name: key, value_name: val }))
-                    .collect();
-                Ok(Value::Array(v))
-            }
+            Actions::ToArray { method } => method.apply(value),
             Actions::ToDict { .. } => {
                 todo!()
             }
         }
+    }
+}
+
+impl ToArray {
+    fn apply(&self, value: Value) -> anyhow::Result<Value> {
+        let value = get_sub_value(value, None)?;
+        let v: anyhow::Result<Vec<Value>> = value
+            .as_object()
+            .unwrap()
+            .into_iter()
+            .map(|(key, val)| match self {
+                ToArray::Box {
+                    key_name,
+                    value_name,
+                } => Ok(json!({ key_name: key, value_name: val })),
+                ToArray::Integrate { key_name } => {
+                    let mut val = val.clone();
+                    val.as_object_mut()
+                        .ok_or(WrongValueAtPath { at_path: "".into() })?
+                        .insert(key_name.clone(), Value::String(key.into()));
+                    Ok(val)
+                }
+            })
+            .collect();
+        Ok(Value::Array(v?))
     }
 }
 
@@ -122,7 +156,6 @@ fn get_sub_value(value: Value, path: Option<&str>) -> anyhow::Result<Value> {
         }),
     }
 }
-
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
