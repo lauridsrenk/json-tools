@@ -11,17 +11,17 @@ use error::{PathNotFound, WrongValueAtPath};
 struct Cli {
     #[arg(short, long, value_name = "FILE")]
     /// optional input file. reads from STDIN if not specified
-    source: Option<PathBuf>,
+    input: Option<PathBuf>,
 
     #[arg(short, long, value_name = "FILE")]
     /// optional output file. prints to STDOUT if not specified
-    dest: Option<PathBuf>,
+    output: Option<PathBuf>,
 
-    #[arg(short, long)]
+    #[arg(long)]
     /// input format. defaults to json
     input_format: Option<InputFormat>,
 
-    #[arg(short, long)]
+    #[arg(long)]
     /// output format. defaults to json-compact
     output_format: Option<OutputFormat>,
 
@@ -80,7 +80,7 @@ enum ToArray {
 
 impl Cli {
     fn read_source(&self) -> anyhow::Result<Value> {
-        let res = match &self.source {
+        let res = match &self.input {
             Some(path) => std::fs::read_to_string(path)?.parse(),
             None => Ok(Value::Null),
         }?;
@@ -93,7 +93,7 @@ impl Cli {
             OutputFormat::JsonPretty => serde_json::to_string_pretty(&value),
         }?;
 
-        match &self.dest {
+        match &self.output {
             Some(path) => {
                 std::fs::write(path, formatted)?;
                 Ok(())
@@ -122,7 +122,7 @@ impl ToArray {
         let value = get_sub_value(value, None)?;
         let v: anyhow::Result<Vec<Value>> = value
             .as_object()
-            .unwrap()
+            .ok_or(WrongValueAtPath { at_path: "".into() })?
             .into_iter()
             .map(|(key, val)| match self {
                 ToArray::Box {
@@ -132,7 +132,9 @@ impl ToArray {
                 ToArray::Integrate { key_name } => {
                     let mut val = val.clone();
                     val.as_object_mut()
-                        .ok_or(WrongValueAtPath { at_path: "".into() })?
+                        .ok_or(WrongValueAtPath {
+                            at_path: key.into(),
+                        })?
                         .insert(key_name.clone(), Value::String(key.into()));
                     Ok(val)
                 }
